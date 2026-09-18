@@ -8,8 +8,14 @@
   <style>
     /* Standalone production utility layer: replaces Tailwind CDN utilities used by this page. */
     *,*::before,*::after{box-sizing:border-box}
+    html{scroll-behavior:smooth}
     html,body{margin:0;min-height:100%;font-family:Arial,sans-serif}
     body{box-sizing:border-box}
+    #nav-open-shelf,#nav-dewey,#nav-grade-hub,#nav-curriculum-books,#nav-resource-center,#nav-deped-curriculum,#nav-deped-resources,#nav-my-books{scroll-margin-top:56px}
+    .nav-pill{display:inline-block;padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:600;text-decoration:none;transition:opacity .15s ease;}
+    .nav-pill:hover{opacity:.85;}
+    #site-nav::-webkit-scrollbar{height:4px;}
+    #site-nav::-webkit-scrollbar-thumb{background:#3a3a5a;border-radius:2px;}
     .h-full{height:100%}.w-full{width:100%}.overflow-auto{overflow:auto}.fixed{position:fixed}.relative{position:relative}.absolute{position:absolute}
     .inset-0{inset:0}.left-3{left:.75rem}.right-4{right:1rem}.top-2\.5{top:.625rem}.top-4{top:1rem}.z-40{z-index:40}.z-50{z-index:50}
     .flex{display:flex}.grid{display:grid}.hidden{display:none}.items-center{align-items:center}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.flex-wrap{flex-wrap:wrap}
@@ -26,8 +32,24 @@
     .bg-gradient-to-b{background-image:linear-gradient(to bottom,var(--tw-gradient-from),var(--tw-gradient-to))}.from-blue-900{--tw-gradient-from:#1e3a8a var(--tw-gradient-from-position);--tw-gradient-to:rgba(30,58,138,0) var(--tw-gradient-to-position)}.to-blue-800{--tw-gradient-to:#1e40af var(--tw-gradient-to-position)}
     @media (min-width:640px){.sm\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.sm\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}}
     @media (min-width:1024px){.lg\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.lg\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}.lg\:grid-cols-5{grid-template-columns:repeat(5,minmax(0,1fr))}}
+    @media (min-width:1280px){.xl\:grid-cols-6{grid-template-columns:repeat(6,minmax(0,1fr))}}
     button,input,select,textarea{font:inherit}
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // ====== SUPABASE SETUP ======
+    // 1. Create a free project at https://supabase.com
+    // 2. Go to Project Settings > API and copy your Project URL and anon public key
+    // 3. Paste them below, replacing the placeholder strings
+    const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';       // e.g. 'https://abcdefgh.supabase.co'
+    const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';     // the long "anon public" key
+    window.supabaseClient = (SUPABASE_URL.indexOf('https://') === 0 && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY' && window.supabase)
+      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      : null;
+    if (!window.supabaseClient) {
+      console.warn('Supabase not configured yet — falling back to local-only storage. See SUPABASE_URL/SUPABASE_ANON_KEY in index.html.');
+    }
+  </script>
   <script>
     (function(){
       if (!window.elementSdk || typeof window.elementSdk.init !== 'function') {
@@ -46,16 +68,61 @@
       }
       if (!window.dataSdk || typeof window.dataSdk.init !== 'function') {
         const KEY = 'sammi-e-library-data-v1';
+        const TABLE = 'library_data';
         const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch(e) { return []; } };
         const write = data => localStorage.setItem(KEY, JSON.stringify(data));
         const makeId = () => (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())+'-'+Math.random().toString(16).slice(2);
         window.dataSdk = {
           _data: [],
           _handler: null,
-          init: function(handler){ this._handler = handler || {}; this._data = read(); if (this._handler.onDataChanged) this._handler.onDataChanged([...this._data]); },
-          create: async function(record){ const item = Object.assign({}, record, {__backendId: record.__backendId || makeId()}); this._data = read(); this._data.push(item); write(this._data); if(this._handler?.onDataChanged)this._handler.onDataChanged([...this._data]); return {isOk:true,item}; },
-          update: async function(record){ this._data = read(); const i=this._data.findIndex(x=>x.__backendId===record.__backendId); if(i<0)return {isOk:false}; this._data[i]=Object.assign({},this._data[i],record); write(this._data); if(this._handler?.onDataChanged)this._handler.onDataChanged([...this._data]); return {isOk:true,item:this._data[i]}; },
-          delete: async function(record){ this._data=read(); const before=this._data.length; this._data=this._data.filter(x=>x.__backendId!==record.__backendId); write(this._data); if(this._handler?.onDataChanged)this._handler.onDataChanged([...this._data]); return {isOk:this._data.length<before}; }
+          init: async function(handler){
+            this._handler = handler || {};
+            if (window.supabaseClient) {
+              const { data, error } = await window.supabaseClient.from(TABLE).select('*');
+              this._data = error ? (console.error('Supabase load error, using local cache:', error), read()) : (data || []);
+            } else {
+              this._data = read();
+            }
+            if (this._handler.onDataChanged) this._handler.onDataChanged([...this._data]);
+          },
+          create: async function(record){
+            const item = Object.assign({}, record, {__backendId: record.__backendId || makeId()});
+            if (window.supabaseClient) {
+              const { error } = await window.supabaseClient.from(TABLE).insert(item);
+              if (error) console.error('Supabase insert error:', error);
+            }
+            this._data.push(item);
+            if (!window.supabaseClient) write(this._data);
+            if (this._handler?.onDataChanged) this._handler.onDataChanged([...this._data]);
+            return {isOk:true,item};
+          },
+          update: async function(record){
+            if (window.supabaseClient) {
+              const { error } = await window.supabaseClient.from(TABLE).update(record).eq('__backendId', record.__backendId);
+              if (error) { console.error('Supabase update error:', error); return {isOk:false}; }
+            } else {
+              this._data = read();
+            }
+            const i=this._data.findIndex(x=>x.__backendId===record.__backendId);
+            if(i<0)return {isOk:false};
+            this._data[i]=Object.assign({},this._data[i],record);
+            if (!window.supabaseClient) write(this._data);
+            if(this._handler?.onDataChanged)this._handler.onDataChanged([...this._data]);
+            return {isOk:true,item:this._data[i]};
+          },
+          delete: async function(record){
+            if (window.supabaseClient) {
+              const { error } = await window.supabaseClient.from(TABLE).delete().eq('__backendId', record.__backendId);
+              if (error) { console.error('Supabase delete error:', error); return {isOk:false}; }
+            } else {
+              this._data = read();
+            }
+            const before=this._data.length;
+            this._data=this._data.filter(x=>x.__backendId!==record.__backendId);
+            if (!window.supabaseClient) write(this._data);
+            if(this._handler?.onDataChanged)this._handler.onDataChanged([...this._data]);
+            return {isOk:this._data.length<before};
+          }
         };
       }
     })();
@@ -110,14 +177,26 @@
       </div>
      </div><button id="add-btn" onclick="openModal()" class="hidden items-center gap-2 px-4 py-2 rounded-lg font-medium transition" style="background: #e8d5b7; color: #1a1a2e;"> <i data-lucide="plus" style="width:18px;height:18px;"></i> Add Book </button>
     </div>
-   </header><!-- Stats & Filter -->
+   </header>
+   <nav id="site-nav" style="position:sticky;top:0;z-index:40;background:#16162a;border-bottom:1px solid #2a2a4a;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
+    <div class="max-w-6xl mx-auto px-6" style="display:flex;gap:6px;padding-top:8px;padding-bottom:8px;">
+     <a href="#nav-open-shelf" class="nav-pill" style="background:#2f7d52;color:#fff;">Open Access Shelf</a>
+     <a href="#nav-dewey" class="nav-pill" style="background:#b8496c;color:#fff;">Dewey Directory</a>
+     <a href="#nav-grade-hub" class="nav-pill" style="background:#397d6e;color:#fff;">Grade-Level Hub</a>
+     <a href="#nav-curriculum-books" class="nav-pill" style="background:#8055a8;color:#fff;">Curriculum E-Books</a>
+     <a href="#nav-resource-center" class="nav-pill" style="background:#5275a8;color:#fff;">Research &amp; Media</a>
+     <a href="#nav-deped-curriculum" class="nav-pill" style="background:#b9820f;color:#3a2600;">Curriculum Hub</a>
+     <a href="#nav-deped-resources" class="nav-pill" style="background:#7a5230;color:#fff;">DepEd Resource Shelf</a>
+     <a href="#nav-my-books" class="nav-pill" style="background:#3a3a5a;color:#fff;">My Books</a>
+    </div>
+   </nav><!-- Stats & Filter -->
    <div class="max-w-6xl mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-3">
     <div class="flex gap-4 text-sm" style="color: #7a7a9a;"><span id="stat-total">0 books</span> <span id="stat-reading">0 reading</span> <span id="stat-completed">0 completed</span>
     </div>
     <div class="flex gap-2"><select id="filter-cat" onchange="renderBooks()" class="px-3 py-1.5 rounded-lg text-sm" style="background: #2a2a4a; color: #ccc; border: 1px solid #3a3a5a;"> <option value="all">All Categories</option> <option value="Fiction">Fiction</option> <option value="Non-Fiction">Non-Fiction</option> <option value="Science">Science</option> <option value="History">History</option> <option value="Technology">Technology</option> <option value="Philosophy">Philosophy</option> <option value="Other">Other</option> </select> <select id="filter-status" onchange="renderBooks()" class="px-3 py-1.5 rounded-lg text-sm" style="background: #2a2a4a; color: #ccc; border: 1px solid #3a3a5a;"> <option value="all">All Status</option> <option value="Reading">Reading</option> <option value="Completed">Completed</option> <option value="Want to Read">Want to Read</option> </select> <button id="login-log-btn" onclick="openLoginLog()" class="hidden items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition" style="background: #2a2a4a; color: #9a9aba; border: 1px solid #3a3a5a;"> <i data-lucide="log-in" style="width:16px;height:16px;"></i> Login Log </button> <button id="download-btn" onclick="downloadCode()" class="hidden items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition" style="background: #2a2a4a; color: #9a9aba; border: 1px solid #3a3a5a;"> <i data-lucide="download" style="width:16px;height:16px;"></i> Download </button>
     </div>
    </div><!-- Open Access Shelf -->
-   <section class="max-w-6xl mx-auto px-6 pb-6" aria-labelledby="open-shelf-title">
+   <section class="max-w-6xl mx-auto px-6 pb-6" id="nav-open-shelf" aria-labelledby="open-shelf-title">
     <div class="rounded-xl p-5" style="background: linear-gradient(135deg, #2f7d52 0%, #1f5c3a 100%); border: 1px solid #3fae72;">
      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
@@ -126,12 +205,12 @@
        <p style="color:#d9f5e4;font-size:13px;margin-top:3px;">Free-to-read titles from public-domain and open-education libraries.</p>
       </div><span class="px-2.5 py-1 rounded-full text-xs" style="background:#e8ac1f;color:#3a2600;">Legal access links</span>
      </div>
-     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2"><a href="https://www.gutenberg.org/ebooks/1342" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #c7ecd7;color:#12233f;"> <p style="font-weight:700;font-size:12.5px;">Pride and Prejudice</p><p style="color:#7a5230;font-size:11px;margin-top:3px;">Jane Austen · Project Gutenberg</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:11px;margin-top:8px;">Read online ↗</span> </a> <a href="https://standardebooks.org/ebooks/charlotte-bronte/jane-eyre" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #c7ecd7;color:#12233f;"> <p style="font-weight:700;font-size:12.5px;">Jane Eyre</p><p style="color:#7a5230;font-size:11px;margin-top:3px;">Charlotte Brontë · Standard Ebooks</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:11px;margin-top:8px;">Read online ↗</span> </a> <a href="https://openstax.org/details/books/biology-2e" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #c7ecd7;color:#12233f;"> <p style="font-weight:700;font-size:12.5px;">Biology 2e</p><p style="color:#7a5230;font-size:11px;margin-top:3px;">Open textbook · OpenStax</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:11px;margin-top:8px;">Study online ↗</span> </a> <a href="https://openstax.org/details/books/college-algebra-2e" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #c7ecd7;color:#12233f;"> <p style="font-weight:700;font-size:12.5px;">College Algebra 2e</p><p style="color:#7a5230;font-size:11px;margin-top:3px;">Open textbook · OpenStax</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:11px;margin-top:8px;">Study online ↗</span> </a>
+     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2"><a href="https://www.gutenberg.org/ebooks/1342" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #c7ecd7;color:#12233f;"> <p style="font-weight:700;font-size:12.5px;">Pride and Prejudice</p><p style="color:#7a5230;font-size:11px;margin-top:3px;">Jane Austen · Project Gutenberg</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:11px;margin-top:8px;">Read online ↗</span> </a> <a href="https://standardebooks.org/ebooks/charlotte-bronte/jane-eyre" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #c7ecd7;color:#12233f;"> <p style="font-weight:700;font-size:12.5px;">Jane Eyre</p><p style="color:#7a5230;font-size:11px;margin-top:3px;">Charlotte Brontë · Standard Ebooks</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:11px;margin-top:8px;">Read online ↗</span> </a> <a href="https://openstax.org/details/books/biology-2e" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #c7ecd7;color:#12233f;"> <p style="font-weight:700;font-size:12.5px;">Biology 2e</p><p style="color:#7a5230;font-size:11px;margin-top:3px;">Open textbook · OpenStax</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:11px;margin-top:8px;">Study online ↗</span> </a> <a href="https://openstax.org/details/books/college-algebra-2e" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #c7ecd7;color:#12233f;"> <p style="font-weight:700;font-size:12.5px;">College Algebra 2e</p><p style="color:#7a5230;font-size:11px;margin-top:3px;">Open textbook · OpenStax</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:11px;margin-top:8px;">Study online ↗</span> </a>
      </div>
      <p style="color:#d9f5e4;font-size:11px;margin-top:12px;">Availability and licensing are provided by each source. Please review the source terms before copying or redistributing materials.</p>
     </div>
    </section><!-- Dewey Decimal Resource Directory -->
-   <section class="max-w-6xl mx-auto px-6 pb-6" aria-labelledby="dewey-title">
+   <section class="max-w-6xl mx-auto px-6 pb-6" id="nav-dewey" aria-labelledby="dewey-title">
     <div class="rounded-xl p-5" style="background:linear-gradient(135deg,#d9628a,#b8496c);border:1px solid #e2678f;">
      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
@@ -140,7 +219,7 @@
        <p style="color:#fbe3ec;font-size:13px;margin-top:3px;">Ten open educational and reference links in every main Dewey category.</p>
       </div><select id="dewey-filter" onchange="renderDeweyLinks()" class="px-3 py-2 rounded-lg text-sm" style="background:rgba(255,255,255,.75);color:#3a0d1e;font-weight:600;border:1px solid #b8496c;" aria-label="Choose a Dewey Decimal category"><option value="all">All categories</option><option value="000">000 · General Works</option><option value="100">100 · Philosophy &amp; Psychology</option><option value="200">200 · Religion</option><option value="300">300 · Social Sciences</option><option value="400">400 · Language</option><option value="500">500 · Science</option><option value="600">600 · Technology</option><option value="700">700 · Arts &amp; Recreation</option><option value="800">800 · Literature</option><option value="900">900 · History &amp; Geography</option></select>
      </div>
-     <div id="dewey-links-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2"></div>
+     <div id="dewey-links-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2"></div>
      <p style="color:#fbe3ec;font-size:11px;margin-top:12px;">Links open trusted public, educational, or reference websites in a new tab. Please review each provider's current terms.</p>
     </div>
    </section>
@@ -161,7 +240,7 @@
    function renderDeweyLinks(){ const grid=document.getElementById('dewey-links-grid'); const selected=document.getElementById('dewey-filter').value; const groups=selected==='all'?Object.keys(deweyResources):[selected]; grid.innerHTML=groups.flatMap(key=>deweyResources[key].map(item=>{const [name,url]=item.split('|');return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#fff;border:1px solid #f2c1d3;color:#12233f;"><p style="font-weight:700;font-size:12.5px;line-height:1.25;">${name}</p><p style="color:#7a5230;font-size:10.5px;margin-top:3px;">${deweyNames[key]}</p><span style="display:inline-block;color:#2b6b45;font-weight:700;font-size:10.5px;margin-top:6px;">Open resource ↗</span></a>`;})).join(''); }
    renderDeweyLinks();
    </script><!-- Grade-Level Learning Hub -->
-   <section class="max-w-6xl mx-auto px-6 pb-6" aria-labelledby="grade-hub-title">
+   <section class="max-w-6xl mx-auto px-6 pb-6" id="nav-grade-hub" aria-labelledby="grade-hub-title">
     <div class="rounded-xl p-5" style="background:linear-gradient(135deg,#12352f,#102a2a);border:1px solid #2f7665;">
      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
@@ -170,11 +249,11 @@
        <p style="color:#b8d8ce;font-size:13px;margin-top:3px;">Open learning links for every stage.</p>
       </div><select id="grade-filter" onchange="renderGradeResources()" class="px-3 py-2 rounded-lg text-sm" style="background:#193f3b;color:#e1f2ed;border:1px solid #397d6e;" aria-label="Choose a grade level"></select>
      </div>
-     <div id="grade-resource-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2"></div>
+     <div id="grade-resource-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2"></div>
      <p style="color:#8fbeb1;font-size:11px;margin-top:12px;">Resources link to established educational, public-domain, museum, science, and open-course providers. Teachers should review materials for local curriculum fit.</p>
     </div>
    </section><!-- Curriculum-Aligned E-Books -->
-   <section class="max-w-6xl mx-auto px-6 pb-6" aria-labelledby="curriculum-books-title">
+   <section class="max-w-6xl mx-auto px-6 pb-6" id="nav-curriculum-books" aria-labelledby="curriculum-books-title">
     <div class="rounded-xl p-5" style="background:linear-gradient(135deg,#3b244f,#241b3d);border:1px solid #8055a8;">
      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
@@ -183,7 +262,7 @@
        <p style="color:#dec8ef;font-size:13px;margin-top:3px;">Open-access books grouped by learning level and subject.</p>
       </div><select id="curriculum-filter" onchange="renderCurriculumBooks()" class="px-3 py-2 rounded-lg text-sm" style="background:#352650;color:#f4eaff;border:1px solid #8055a8;" aria-label="Choose a curriculum level"></select>
      </div>
-     <div id="curriculum-book-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2"></div>
+     <div id="curriculum-book-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2"></div>
      <p style="color:#c4a9d8;font-size:11px;margin-top:12px;">Links open the original provider. Check the provider's current licence and local curriculum requirements before assigning texts.</p>
     </div>
    </section>
@@ -197,7 +276,7 @@
    <script>const gradeResources={'Junior Casa':[['Khan Academy Kids','https://learn.khanacademy.org/khan-academy-kids/','Early learning'],['PBS Kids','https://pbskids.org/','Games & stories'],['Starfall','https://www.starfall.com/','Reading & math'],['National Geographic Kids','https://kids.nationalgeographic.com/','Nature'],['Oxford Owl','https://www.oxfordowl.co.uk/','Early reading'],['Sesame Street','https://www.sesamestreet.org/','Learning games']],'Junior Advanced Casa':[['ABCya','https://www.abcya.com/','Practice games'],['Storyline Online','https://storylineonline.net/','Read-alouds'],['NASA Kids','https://www.nasa.gov/learning-resources/for-kids-and-students/','Space science'],['Math Learning Center','https://www.mathlearningcenter.org/','Early math'],['BBC Bitesize','https://www.bbc.co.uk/bitesize/subjects/zv38q6f','Primary lessons'],['Khan Academy Kids','https://learn.khanacademy.org/khan-academy-kids/','Foundations']],'Advanced Casa':[['Khan Academy','https://www.khanacademy.org/','Math & science'],['ReadWorks','https://www.readworks.org/','Reading'],['CK-12','https://www.ck12.org/','STEM'],['Smithsonian Learning Lab','https://learninglab.si.edu/','Exploration'],['Code.org','https://code.org/student','Coding'],['Wonderopolis','https://wonderopolis.org/','Inquiry']],'Grade 1':[['Khan Academy Math','https://www.khanacademy.org/math/cc-1st-grade-math','Math'],['PBS LearningMedia','https://www.pbslearningmedia.org/','Lessons'],['ReadWorks','https://www.readworks.org/','Reading'],['PhET','https://phet.colorado.edu/','Science'],['TypingClub','https://www.typingclub.com/','Keyboarding'],['NatGeo Kids','https://kids.nationalgeographic.com/','World knowledge']],'Grade 2':[['Khan Academy Math','https://www.khanacademy.org/math/cc-2nd-grade-math','Math'],['Epic Reading','https://www.getepic.com/','Reading'],['Code.org','https://code.org/learn','Computing'],['NASA STEM','https://www.nasa.gov/learning-resources/','Science'],['Math Learning Center','https://www.mathlearningcenter.org/','Math tools'],['Ducksters','https://www.ducksters.com/','Reference']],'Grade 3':[['Khan Academy Math','https://www.khanacademy.org/math/cc-3rd-grade-math','Math'],['ReadTheory','https://readtheory.org/','Comprehension'],['Mystery Science','https://mysteryscience.com/','Science'],['LOC Kids','https://www.loc.gov/kids/','History'],['Poetry Foundation','https://www.poetryfoundation.org/','Poetry'],['Code.org','https://code.org/learn','Coding']],'Grade 4':[['Khan Academy Math','https://www.khanacademy.org/math/cc-4th-grade-math','Math'],['CK-12','https://www.ck12.org/student/','STEM'],['CommonLit','https://www.commonlit.org/','Reading'],['NASA Climate Kids','https://climatekids.nasa.gov/','Earth science'],['iCivics','https://ed.icivics.org/','Civics'],['Smithsonian Lab','https://learninglab.si.edu/','Research']],'Grade 5':[['Khan Academy Math','https://www.khanacademy.org/math/cc-5th-grade-math','Math'],['OpenStax','https://openstax.org/subjects','Open textbooks'],['DocsTeach','https://www.docsteach.org/','History'],['PhET','https://phet.colorado.edu/','Science'],['Code.org','https://code.org/learn','Coding'],['Poets.org','https://poets.org/','Writing']],'Grade 6':[['Khan Academy Math','https://www.khanacademy.org/math/cc-6th-grade-math','Math'],['Grammar','https://www.khanacademy.org/humanities/grammar','Language'],['OpenStax','https://openstax.org/subjects','Science'],['CommonLit','https://www.commonlit.org/','Literacy'],['NatGeo Education','https://education.nationalgeographic.org/','Geography'],['Code.org','https://code.org/learn','Computing']],'Grade 7':[['Khan Academy Math','https://www.khanacademy.org/math/cc-7th-grade-math','Math'],['CK-12','https://www.ck12.org/student/','STEM'],['iCivics','https://www.icivics.org/','Civics'],['ReadWorks','https://www.readworks.org/','Reading'],['NASA STEM','https://www.nasa.gov/learning-resources/','Science'],['LOC Education','https://www.loc.gov/education/','Research']],'Grade 8':[['Khan Academy Math','https://www.khanacademy.org/math/cc-8th-grade-math','Math'],['OpenStax Math','https://openstax.org/subjects/math','Mathematics'],['Scratch','https://scratch.mit.edu/','Programming'],['Smithsonian Lab','https://learninglab.si.edu/','Research'],['National Archives','https://www.archives.gov/education','History'],['Purdue OWL','https://owl.purdue.edu/','Writing']],'Grade 9':[['Khan Academy High School','https://www.khanacademy.org/high-school-math','Math'],['OpenStax Biology','https://openstax.org/details/books/biology-2e','Biology'],['OpenStax Chemistry','https://openstax.org/details/books/chemistry-2e','Chemistry'],['MIT OCW','https://ocw.mit.edu/','Courses'],['Project Gutenberg','https://www.gutenberg.org/','Literature'],['iCivics','https://www.icivics.org/','Government']],'Grade 10':[['Khan Academy Test Prep','https://www.khanacademy.org/test-prep','Exam prep'],['OpenStax Physics','https://openstax.org/details/books/college-physics-2e','Physics'],['OpenStax History','https://openstax.org/details/books/world-history-2e','History'],['Purdue OWL','https://owl.purdue.edu/','Writing'],['NASA STEM','https://www.nasa.gov/learning-resources/','STEM'],['Standard Ebooks','https://standardebooks.org/','Literature']],'Grade 11':[['Khan Academy','https://www.khanacademy.org/','Practice'],['OpenStax Precalculus','https://openstax.org/details/books/precalculus-2e','Mathematics'],['MIT OCW','https://ocw.mit.edu/','College preview'],['OpenStax Psychology','https://openstax.org/details/books/psychology-2e','Psychology'],['Stanford Philosophy','https://plato.stanford.edu/','Philosophy'],['LOC Research','https://www.loc.gov/','Research']],'Grade 12':[['Khan Academy Test Prep','https://www.khanacademy.org/test-prep','College readiness'],['OpenStax Calculus','https://openstax.org/details/books/calculus-volume-1','Calculus'],['OpenStax Economics','https://openstax.org/details/books/principles-economics-3e','Economics'],['MIT OCW','https://ocw.mit.edu/','Higher education'],['Purdue OWL','https://owl.purdue.edu/','Research writing'],['Project Gutenberg','https://www.gutenberg.org/','Literature']],'College':[['MIT OCW','https://ocw.mit.edu/','Free courses'],['OpenStax','https://openstax.org/subjects','Open textbooks'],['Khan Academy','https://www.khanacademy.org/','Practice'],['edX','https://www.edx.org/','Courses'],['OER Commons','https://oercommons.org/','Open resources'],['LibreTexts','https://libretexts.org/','Textbooks']]};
    function renderGradeResources(){const g=document.getElementById('grade-resource-grid'),l=document.getElementById('grade-filter').value;g.innerHTML=(gradeResources[l]||[]).map(([n,u,s])=>`<a href="${u}" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2 transition" style="background:#193f3b;border:1px solid #397d6e;color:#f0eadf;"><p style="font-weight:700;font-size:12px;line-height:1.25;">${n}</p><p style="color:#b8d8ce;font-size:10.5px;margin-top:3px;">${s}</p><span style="display:inline-block;color:#8bd5bd;font-weight:700;font-size:10.5px;margin-top:6px;">Open resource ↗</span></a>`).join('');}const gs=document.getElementById('grade-filter');Object.keys(gradeResources).forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;gs.appendChild(o);});renderGradeResources();
    </script><!-- Expanded Resource Center -->
-   <section class="max-w-6xl mx-auto px-6 pb-6" aria-labelledby="resource-center-title">
+   <section class="max-w-6xl mx-auto px-6 pb-6" id="nav-resource-center" aria-labelledby="resource-center-title">
     <div class="rounded-xl p-5" style="background:linear-gradient(135deg,#26334a,#182538);border:1px solid #5275a8;">
      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
@@ -206,12 +285,12 @@
        <p style="color:#c3d4eb;font-size:13px;margin-top:3px;">Trusted resources for reading, research, STEM, history, creativity, and accessibility.</p>
       </div><select id="resource-filter" onchange="renderResourceCenter()" class="px-3 py-2 rounded-lg text-sm" style="background:#243653;color:#edf4ff;border:1px solid #5275a8;" aria-label="Choose a resource category"><option>Audiobooks &amp; Read-Alongs</option><option>Research &amp; Reference Databases</option><option>Multimedia &amp; Interactive Learning</option><option>Streaming Video Libraries</option><option>Interactive STEM Tools</option><option>Educational Audio &amp; Podcasts</option><option>Primary Sources &amp; Local Archives</option><option>Student Productivity &amp; Accessibility</option></select>
      </div>
-     <div id="resource-center-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2"></div>
+     <div id="resource-center-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2"></div>
      <p style="color:#9eb7d5;font-size:11px;margin-top:12px;">Links open the original provider in a new tab. Review access, age suitability, privacy, and curriculum fit.</p>
     </div>
    </section>
    <script>const resourceCenter={"Audiobooks & Read-Alongs":[["LibriVox","https://librivox.org/","Public-domain audiobooks"],["Storyline Online","https://storylineonline.net/","Children’s read-alouds"],["Lit2Go","https://etc.usf.edu/lit2go/","Poetry and stories"],["Project Gutenberg Audio","https://www.gutenberg.org/browse/categories/1","Free classics"],["Poetry Archive","https://poetryarchive.org/","Poems read aloud"],["International Children’s Digital Library","http://en.childrenslibrary.org/","Global children’s books"]],"Research & Reference Databases":[["Britannica School","https://school.eb.com/","General encyclopedia"],["Google Scholar","https://scholar.google.com/","Academic research"],["DOAJ","https://doaj.org/","Open journals"],["ERIC","https://eric.ed.gov/","Education research"],["Pew Research Center","https://www.pewresearch.org/","Current events and data"],["Newsela","https://newsela.com/","News by reading level"]],"Multimedia & Interactive Learning":[["Khan Academy","https://www.khanacademy.org/","Math and science"],["CK-12","https://www.ck12.org/student/","Interactive STEM"],["PBS LearningMedia","https://www.pbslearningmedia.org/","Lessons and media"],["Smithsonian Learning Lab","https://learninglab.si.edu/","Museum collections"],["PhET Simulations","https://phet.colorado.edu/","Science simulations"],["Desmos","https://www.desmos.com/","Interactive math"]],"Streaming Video Libraries":[["PBS LearningMedia","https://www.pbslearningmedia.org/","Curriculum videos"],["NASA Video","https://www.nasa.gov/nasa-at-home/","Space and science"],["Crash Course","https://thecrashcourse.com/","Subject explainers"],["TED-Ed","https://ed.ted.com/","Animated lessons"],["NFB Education","https://www.nfb.ca/education/","Documentaries"],["Library of Congress Video","https://www.loc.gov/film-and-videos/","Primary media sources"]],"Interactive STEM Tools":[["Code.org","https://code.org/learn","Computer science"],["Scratch","https://scratch.mit.edu/","Creative coding"],["Arduino Education","https://www.arduino.cc/education/","Engineering projects"],["NASA STEM","https://www.nasa.gov/learning-resources/","Space STEM"],["NOAA Education","https://www.noaa.gov/education","Earth science"],["GeoGebra","https://www.geogebra.org/","Geometry and algebra"]],"Educational Audio & Podcasts":[["Brains On!","https://www.brainson.org/","Science for young learners"],["But Why","https://www.vermontpublic.org/podcast/but-why","Questions and discovery"],["Wow in the World","https://wondery.com/shows/wow-in-the-world/","Science and technology"],["TED Talks Daily","https://www.ted.com/podcasts/ted-talks-daily","Ideas and innovation"],["NASA Podcasts","https://www.nasa.gov/podcasts/","Space exploration"],["History Chicks","https://thehistorychicks.com/","History profiles"]],"Primary Sources & Local Archives":[["Library of Congress","https://www.loc.gov/","Photographs and documents"],["DocsTeach","https://www.docsteach.org/","Primary sources"],["Smithsonian Collections","https://www.si.edu/collections","Museum objects"],["DPLA","https://dp.la/","Local collections"],["Chronicling America","https://chroniclingamerica.loc.gov/","Historic newspapers"],["Internet Archive","https://archive.org/details/texts","Digitized books and media"]],"Student Productivity & Accessibility":[["Purdue OWL","https://owl.purdue.edu/","Citation and writing guides"],["ZoteroBib","https://zbib.org/","Quick citations"],["MyBib","https://www.mybib.com/","Bibliography builder"],["GCFGlobal","https://edu.gcfglobal.org/en/","Digital skills"],["Microsoft Learning Tools","https://www.microsoft.com/en-us/education/products/learning-tools","Accessibility tools"],["Bookshare","https://www.bookshare.org/","Accessible ebooks"]]};function renderResourceCenter(){const g=document.getElementById('resource-center-grid'),k=document.getElementById('resource-filter').value;g.innerHTML=(resourceCenter[k]||[]).map(([n,u,s])=>`<a href="${u}" target="_blank" rel="noopener noreferrer" class="rounded-lg p-2" style="background:#243653;border:1px solid #5275a8;color:#f3eadb;"><p style="font-weight:700;font-size:12px;line-height:1.25;">${n}</p><p style="color:#c3d4eb;font-size:10.5px;margin-top:3px;">${s}</p><span style="display:inline-block;color:#a8c7f0;font-weight:700;font-size:10.5px;margin-top:6px;">Open resource ↗</span></a>`).join('');}renderResourceCenter();</script><!-- Search --> <!-- Philippine DepEd Curriculum Hub -->
-   <section class="max-w-6xl mx-auto px-6 pb-6" aria-labelledby="deped-curriculum-title">
+   <section class="max-w-6xl mx-auto px-6 pb-6" id="nav-deped-curriculum" aria-labelledby="deped-curriculum-title">
     <div class="rounded-xl p-5" style="background:linear-gradient(135deg,#e8ac1f,#b9820f);border:1px solid #e8ac1f;">
      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
@@ -220,11 +299,11 @@
        <p style="color:#3a2600;font-size:13px;margin-top:3px;">Subject guides organized by Kindergarten, key stage, grade level, and Senior High School track. Click any subject to open a matching learning resource.</p>
       </div><select id="deped-filter" onchange="renderDepEdSubjects()" class="px-3 py-2 rounded-lg text-sm" style="background:rgba(255,255,255,.75);color:#3a2600;font-weight:600;border:1px solid #b9820f;" aria-label="Choose a Philippine curriculum level"></select>
      </div>
-     <div id="deped-subject-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2"></div>
+     <div id="deped-subject-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2"></div>
      <p style="color:#3a2600;font-size:11px;margin-top:12px;">This overview follows the curriculum structure supplied for this library. Schools may sequence subjects and learning competencies according to current DepEd guidance.</p>
     </div>
    </section><!-- Philippine DepEd Learning Resources -->
-   <section class="max-w-6xl mx-auto px-6 pb-6" aria-labelledby="deped-resources-title">
+   <section class="max-w-6xl mx-auto px-6 pb-6" id="nav-deped-resources" aria-labelledby="deped-resources-title">
     <div class="rounded-xl p-5" style="background:linear-gradient(135deg,#7a5230,#5a3b21);border:1px solid #7a5230;">
      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
@@ -233,7 +312,7 @@
        <p style="color:#f0ddc9;font-size:13px;margin-top:3px;">Helpful curriculum guides, learning portals, and subject resources for Kindergarten through Senior High School.</p>
       </div><select id="deped-resource-filter" onchange="renderDepEdResources()" class="px-3 py-2 rounded-lg text-sm" style="background:rgba(255,255,255,.8);color:#5a3b21;font-weight:600;border:1px solid #5a3b21;" aria-label="Choose a Philippine education resource category"> <option value="all">All resource groups</option><option value="official">Official DepEd &amp; curriculum</option><option value="early">Kindergarten &amp; elementary</option><option value="junior">Junior High School</option><option value="senior">Senior High School</option><option value="teachers">Teacher &amp; family support</option> </select>
      </div>
-     <div id="deped-resource-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2"></div>
+     <div id="deped-resource-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2"></div>
      <p style="color:#f0ddc9;font-size:11px;margin-top:12px;">Resources open in a new tab. Availability and curriculum alignment may change, so teachers and families should review each provider before use.</p>
     </div>
    </section>
@@ -292,7 +371,7 @@
     <div class="relative"><i data-lucide="search" class="absolute left-3 top-2.5" style="width:18px;height:18px;color:#7a7a9a;"></i> <input id="search-input" oninput="renderBooks()" type="text" placeholder="Search by title or author..." class="w-full pl-10 pr-4 py-2.5 rounded-lg text-sm" style="background: #2a2a4a; color: #eee; border: 1px solid #3a3a5a;">
     </div>
    </div><!-- Books Grid -->
-   <main class="max-w-6xl mx-auto px-6 pb-8">
+   <main id="nav-my-books" class="max-w-6xl mx-auto px-6 pb-8">
     <div id="books-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
     <div id="empty-state" class="hidden text-center py-16"><i data-lucide="book-open" style="width:48px;height:48px;color:#3a3a5a;margin:0 auto;"></i>
      <p style="color:#7a7a9a;margin-top:12px;">No books yet. Add your first book to get started!</p>
@@ -533,6 +612,19 @@
   };
   window.dataSdk.init(dataHandler);
   safeCreateIcons();
+
+  // Log every resource-link click (works across all resource grids without touching each card)
+  document.addEventListener('click', function(e){
+    const link = e.target.closest('a[target="_blank"]');
+    if (!link || !window.supabaseClient) return;
+    const titleEl = link.querySelector('p');
+    const resourceName = titleEl ? titleEl.textContent.trim() : link.textContent.trim().slice(0, 120);
+    window.supabaseClient.from('resource_clicks').insert({
+      lrn: currentUser || null,
+      resource_name: resourceName,
+      resource_url: link.href
+    }).then(({error}) => { if (error) console.error('Click log error:', error); });
+  });
 
   function updateStats() {
     const libraryBooks = books.filter(b => !b.lrn && b.title);
